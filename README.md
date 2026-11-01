@@ -103,7 +103,7 @@ flowchart TB
     AGENT --> LLM
     SRC -->|"수집"| GHA
     GHA -->|"pipeline_rw 쓰기"| K
-    GHA -->|"pipeline_rw<br/>tasks · recommendations · metric_logs · links 쓰기<br/>users · memory · ics_links · reports 읽기"| PV
+    GHA -->|"pipeline_rw<br/>tasks · recommendations · metric_logs · links 쓰기<br/>users · memory · ics_links · reports · metric_logs 읽기"| PV
     GHA --> LLM
     UP -->|"5분마다 /health"| API
 ```
@@ -126,7 +126,7 @@ flowchart TB
 |---|---|---|
 | `api_rw` | API 모듈 | `private` 읽기·쓰기, `knowledge` 읽기, 꼭 알아야 할 것 데이터 쓰기 |
 | `agent_ro` | Agent 모듈 | `notices`, `events`, `offered_courses`, `grad_rules`, `knowledge_chunks` 읽기만 |
-| `pipeline_rw` | 정기 작업 | `knowledge` 쓰기(배포 때 졸업 규칙 YAML 싣기 포함), `tasks`·`recommendations`·`metric_logs`·`links` 쓰기, `users`·`memory`·`ics_links`·`reports` 읽기 |
+| `pipeline_rw` | 정기 작업 | `knowledge` 쓰기(배포 때 졸업 규칙 YAML 싣기 포함), `tasks`·`recommendations`·`metric_logs`·`links` 쓰기, `users`·`memory`·`ics_links`·`reports`·`metric_logs` 읽기 |
 | `backup_ro` | 매일 백업 | `private` 읽기 |
  
 **정기 작업**
@@ -137,8 +137,11 @@ flowchart TB
 | `release.yml` | `main` 병합 | 마이그레이션 적용 → 졸업 규칙 YAML을 `grad_rules`에 싣기 → Render 배포 훅 → `/health` 확인 → Vercel CLI로 웹 배포. Render 자동 배포는 꺼 둔다 |
 | `pipeline-hourly.yml` | 매시간 | .ics 동기화. 3시간마다 크롤링, LLM 정리, 임베딩도 함께 |
 | `pipeline-daily.yml` | 매일 05:00 (KST) | 추천 카드, 링크 점검, 지표 집계, `private` 암호화 백업, 2학기 지난 공지 삭제 |
+| `pipeline-semester.yml` | 학기마다 수동 실행 | 학과 졸업요건·교육과정 페이지, 학사일정, 개설강좌 수집 |
  
 예약 작업이 정각에 몰리면 늦게 시작할 수 있어, cron의 분은 정각을 피한다(예: `17 * * * *`).
+
+**환경**: 로컬(Docker Compose + 로컬 Supabase), staging(Render 두 번째 무료 서비스 + 두 번째 무료 Supabase 프로젝트 + Vercel 미리보기, 백엔드는 깨워 두지 않음), 운영(Render + Vercel + 첫 번째 Supabase 프로젝트).
  
 **원칙**
  
@@ -156,7 +159,7 @@ flowchart TB
 - 비밀 값(DB 주소, Gemini 키, .ics 암호화 키, `VERCEL_TOKEN`)은 Render 환경 설정과 GitHub Secrets에만 둔다. 저장소는 공개다.
 - `private` 백업은 `age`로 암호화해 7일만 보관한다.
 - 공개 페이지만 수집하고, robots.txt를 지키며, 사이트마다 초당 1회 이하로 요청하고, 프로젝트를 밝히는 User-Agent를 쓴다. 같은 글은 URL과 내용 해시로 한 번만 저장하고, 공지는 2학기 동안만 보관한다.
-- 학과 홈페이지의 졸업요건·교육과정·로드맵 페이지와 PDF는 매일 다시 가져오고, 바뀌면 학교 지식의 예전 조각을 바꾸거나 지운다. 사람이 하는 일은 두 가지뿐이다. 학점 기준이 바뀌면(학교 학점이수표, 학과 공지) 운영자가 졸업 규칙 YAML에 옮겨 넣어 PR로 올리고, 학생은 자기 GLS 표를 붙여 넣는다. 크롤러는 새 학점이수표나 학과 졸업요건 공지를 찾으면 운영자 확인 작업을 만들 뿐, 규칙 데이터를 직접 고치지 않는다. 크롤러는 GLS에 로그인하지 않는다.
+- 학과 홈페이지의 졸업요건·교육과정·로드맵 페이지와 PDF는 학기마다 수동 실행으로 다시 가져오고, 바뀌면 학교 지식의 예전 조각을 바꾸거나 지운다. 학기 중 졸업요건 변경 공지는 학과 공지 크롤링으로 들어온다. 사람이 하는 일은 두 가지뿐이다. 학점 기준이 바뀌면(학교 학점이수표, 학과 공지) 운영자가 학기마다 확인해 졸업 규칙 YAML에 옮겨 넣어 PR로 올리고, 학생은 자기 GLS 표를 붙여 넣는다. 크롤러는 규칙 데이터를 직접 고치지 않고, GLS에 로그인하지 않는다.
 **확장성과 한계**
  
 지금은 무료 등급(Render, Supabase Free, Gemini 무료)에 맞춰 서버 하나로 시작한다. 바깥 서비스는 인터페이스 뒤에 두어, 바꿀 때 고치는 곳이 그 모듈의 설정에 머물게 한다. 다만 무료 등급에는 돈을 내야만 풀리는 한계가 있으므로, 한계마다 지금 값, 확인하는 방법, 바꾸는 곳을 적는다. 측정값은 시험하면서 채운다.
@@ -199,7 +202,7 @@ cleanup:               # 공지 정리, ⚙ 설정
 | FE | 권유민, 김호준 | `web/`: 학생·교수·관리자·지표 화면 전부, 화면 시험 |
 | BE | 강민주, 최영훈 | API(`api/`, `db/`), 수집(`pipeline/collect/`: 크롤러, .ics 동기화, 링크 점검), DB(`supabase/`), 로그인 설정, 배포와 정기 작업 |
 | AI·RAG | 박연우, 성민호, 이건 | Agent(`agent/`), 규칙 엔진(`rules/`), LLM 클라이언트(`llm/`), 정리(`pipeline/process/`), 평가 데이터(`evaluation/`), 졸업 규칙 YAML(`rules/data/`) |
-| 통합 담당 | [TBD: Sprint 0에서 결정, AI·RAG 1명] | 인터페이스 정의(`contracts/`), CI(`ci.yml`), 평가 데이터, 지표 집계와 주간 보고, 부하 시험 |
+| 통합 담당 | [TBD: Sprint 0에서 결정, AI·RAG 1명] | 인터페이스 정의(`contracts/`), `FakeAgent`, CI(`ci.yml`), 평가 데이터, 지표 집계와 주간 보고, 부하 시험 |
  
 **팀 안의 역할 나누기 (제안)**
  
@@ -207,11 +210,11 @@ cleanup:               # 공지 정리, ⚙ 설정
 |---|---|---|
 | FE-1 | 학생 화면: 로그인·가입(개인정보 동의, 학생·교수 분기, 로그아웃), 홈, 소식, 졸업요건 채팅과 이수 내역, 로드맵, 내 기억, 공고 목록. 컴포넌트 시험 | [TBD: 팀 합의] |
 | FE-2 | 교수 화면(승인 대기, 본인 공고), 관리자·지표 화면, 생성된 API 클라이언트, SSE 읽기, MSW mock, 데이터 갱신 규칙, 기준선 측정, Playwright 시험 | [TBD: 팀 합의] |
-| BE-1 | `api/`, `db/`, `FakeAgent`, 졸업요건 채팅 SSE, 확인한 GLS 표 저장, 권한 시험 | [TBD: 팀 합의] |
-| BE-2 | 마이그레이션(`supabase/`), 로그인 설정, 크롤러, .ics 동기화, 링크 점검, 워크플로와 배포, 백업 | [TBD: 팀 합의] |
+| BE-1 | `api/`, `db/`, 로그인 설정, 마이그레이션(`private` 스키마, DB 로그인, RLS), 졸업요건 채팅 SSE, 확인한 GLS 표 저장, 권한 시험, 백업·로컬 개발 환경(BE-2와 공동, 주담당) | [TBD: 팀 합의] |
+| BE-2 | 마이그레이션(`knowledge` 스키마, `raw_documents`), 크롤러, .ics 동기화, 링크 점검, 워크플로와 배포(BE-1과 공동, 주담당) | [TBD: 팀 합의] |
 | AI·RAG-1 | 규칙 엔진(`plan_today`, `diagnose`, `build_roadmap`, `verify`), 졸업 규칙 YAML, 학생 정정 대조(`check_claim`), 회귀 사례화 | [TBD: 팀 합의] |
 | AI·RAG-2 | 졸업요건 Agent, GLS 붙여넣기 읽기, 캠퍼스 라이프 Agent, ⚙ 설정 해석, 공지 정리·임베딩, LLM 클라이언트 | [TBD: 팀 합의] |
-| AI·RAG-3 | 통합 담당: 인터페이스, CI, 평가 데이터, 지표 집계와 주간 보고, 부하 시험 | [TBD: 팀 합의] |
+| AI·RAG-3 | 통합 담당: 인터페이스, `FakeAgent`, CI, 평가 데이터, 지표 집계와 주간 보고, 부하 시험 | [TBD: 팀 합의] |
  
 **여러 팀이 나눠 맡는 일**
  
@@ -224,7 +227,7 @@ cleanup:               # 공지 정리, ⚙ 설정
 | 졸업요건 채팅 | 답변 생성은 AI·RAG, SSE 전달은 BE, 화면은 FE |
 | 오류 신고 | 버튼과 관리자 화면은 FE, API와 테이블은 BE, 자동 신고와 회귀 사례화는 AI·RAG |
 | 로그인 | Supabase 설정, 도메인 트리거, 토큰 검증은 BE, 로그인 화면은 FE |
-| 지표 | 팀마다 자기 이벤트를 기록하고, 집계·정의·주간 보고는 통합 담당, 차트는 FE |
+| 지표 | 팀마다 자기 이벤트를 기록하고, 정의·집계·주간 보고는 통합 담당, 집계 작업 실행과 `metric_logs` 테이블은 BE, 차트는 FE |
  
 ## 4. 저장소 구조
  
@@ -272,6 +275,7 @@ skkey/
 | 엔드포인트 | 호출자 | 용도 |
 |---|---|---|
 | `GET /me`, `POST /me/onboarding` | 모두 | 프로필, 역할, 첫 로그인 질문 |
+| `DELETE /me` | 학생 | 회원 탈퇴 |
 | `GET /home` | 학생 | 홈 한 번에: 경고 배너, 할 일, 오늘의 플랜, 꼭 알아야 할 것, 카드 |
 | `GET/POST /tasks`, `PATCH /tasks/{id}` | 학생 | 할 일 목록, 직접 추가, 완료 체크, 예상 소요 시간 고치기 |
 | `PUT/DELETE /me/ics-link` | 학생 | i-Campus 연결, 해제 |
@@ -282,10 +286,12 @@ skkey/
 | `PUT /me/settings` | 학생 | ⚙ 설정 저장: 플랜의 종류 순서, 추천에 쓰는 글 |
 | `GET/PUT /transcript` | 학생 | 이수 내역과 영역별 학점 (직접 입력, 채팅에서 확인한 GLS 표 저장) |
 | `POST /graduation/chat` (SSE) | 학생 | 졸업요건 채팅 |
+| `GET /roadmap`, `POST /roadmap/verify` | 학생 | 마지막 로드맵 조회, 후보 과목을 바꾼 로드맵 재검증 |
 | `POST /reports`, `GET /reports/mine` | 학생 | 오류 신고와 처리 결과 |
 | `GET /memory`, `PATCH/DELETE /memory/{id}` | 학생 | 내 기억 |
 | `GET /postings`, `POST /postings/{id}/to-tasks` | 학생 | 공고 목록, 마감일을 할 일에 넣기 |
-| `POST/PATCH/DELETE /postings/{id}` | 승인된 교수 | 공고 쓰기, 고치기, 내리기 |
+| `POST /postings` | 승인된 교수 | 공고 쓰기 |
+| `PATCH/DELETE /postings/{id}` | 승인된 교수 | 공고 고치기, 내리기 |
 | `GET /links` | 모두 | 바로가기 |
 | `/admin/professors`, `/admin/reports`, `/admin/must-know`, `/admin/links`, `/admin/metrics` | 운영자 | 관리자 기능 |
 | `GET /health` | UptimeRobot | 백엔드와 DB 상태 |
@@ -354,14 +360,13 @@ class RuleEngine(Protocol):  # rules/의 순수 함수. 입출력과 LLM 없음
 | 오늘의 플랜·⚙ 설정 연결<br>(BE-1 · 1, 3) | `GET /home`과 `POST /plan/reset`에서 할 일과 학생이 고른 종류 순서로 `RuleEngine.plan_today`를 부른다(결과는 저장하지 않음). `PUT /me/settings`에서 종류 순서는 그대로 저장하고, 글이 있으면 `AgentFacade.interpret_settings`로 추천 선호와 기억할 사실을 받아 저장한 뒤 그 학생의 카드를 `recommend`로 한 번 다시 만든다. | 플랜 재설정 5초 안에 응답<br>오늘의 플랜 계산에 LLM 호출 0회<br>설정의 글을 저장하면 카드가 한 번 다시 만들어짐 |
 | 졸업요건 채팅 SSE<br>(BE-1 · 4) | 학생 한 명분 `StudentContext`(익명 id, 입학년도, 관심 분야, 가중치, 반응 요약, 저장된 사실)와 이수 내역, 대화 기록을 `AgentFacade.graduation_chat`에 넘기고, 나오는 이벤트를 SSE로 그대로 전달한다. 끝나면 메시지와 기억 제안을 저장한다. `check_claim`의 `rule_conflict`가 참이면 오류 신고를 자동으로 만든다. | 진행 상태 3초, 전체 답변 20초 안<br>`StudentContext`에 이름·이메일 0건 |
 | 확인한 GLS 표 저장<br>(BE-1 · 4) | 학생이 채팅에서 확인·수정한 영역별 학점표를 `PUT /transcript`로 받아 저장한다. 확인 전의 읽은 값은 진단에 쓰지 않는다. 학생이 확인한 기준학점이 그 학번의 `grad_rules`와 다르면 오류 신고를 만든다. LLM에 보내기 전에 붙여 넣은 글에서 이름·학번 줄을 지운다. 학교 계정 정보는 받지 않는다. | 확인하지 않은 표가 진단에 쓰인 경우 0건<br>LLM으로 간 글에 이름·학번 0건<br>기준학점을 일부러 바꾼 예시에서 학생 확인 후 오류 신고 생성 |
-| `FakeAgent`<br>(BE-1 · Sprint 0) | `AgentFacade`를 고정된 답으로 흉내 내는 대역. AI·RAG가 준비되기 전까지 BE와 FE가 이것으로 개발한다. | 실제 Agent와 같은 인터페이스 시험 통과 |
-| 마이그레이션<br>(BE-2 · Sprint 0–6) | `supabase/migrations/`: `knowledge`·`private` 스키마와 테이블, DB 로그인 4개(`api_rw`, `agent_ro`, `pipeline_rw`, `backup_ro`)와 권한, 모든 `private` 테이블의 RLS(브라우저 역할에는 정책 없음), `raw_documents`. | 빈 로컬 DB와 staging에 깨끗이 적용<br>`agent_ro`의 `private` 읽기와 브라우저 공개 키의 모든 읽기 100% 거부<br>`api_rw`, `pipeline_rw`도 정한 권한 밖은 100% 거부 |
-| 로그인 설정<br>(BE-2 · Sprint 0) | Supabase Auth 이메일 코드(6자리, 10분 유효), 학교 도메인(`@skku.edu`, `@g.skku.edu`)만 받는 `auth.users` 트리거, 팀 계정 Gmail SMTP. | `@g.skku.edu`로 1분 안에 코드 도착, 스팸함 아님<br>gmail.com 주소 거부<br>10분 지난 코드 실패 |
-| 크롤러<br>(BE-2 · 2, 4, 5) | `pipeline/collect/`에 출처마다 작은 크롤러 하나(공통 `Source` 인터페이스), 출처 목록은 `pipeline/sources.yaml`. 출처: 학교·학과 공지 게시판, 학사일정, 학과 홈페이지의 졸업요건·교육과정·로드맵 페이지와 PDF(매일), 킹고인포 개설강좌, 학교 교육과정 페이지(새 학점이수표가 올라왔는지만 확인). 도구: httpx + BeautifulSoup4(lxml), RSS는 feedparser, JavaScript로만 그려지는 페이지만 Playwright, PDF는 pdfplumber 또는 PyMuPDF. 공개 페이지만, robots.txt 준수, 사이트마다 초당 1회 이하, 프로젝트를 밝히는 User-Agent. `raw_documents`에 URL과 내용 해시로 저장한다. 새 학점이수표나 학과 졸업요건 공지를 찾으면 운영자 확인 작업을 만든다. | 저장한 페이지 스냅샷 100%가 기대한 제목·날짜·URL로 파싱됨<br>다시 돌려도 중복 행 0건<br>새 공지가 6시간 안에 화면에 나옴<br>robots.txt가 막은 주소 요청 0건 |
+| 마이그레이션<br>(BE-1, BE-2 · Sprint 0–6) | `supabase/migrations/`: `knowledge`·`private` 스키마와 테이블, DB 로그인 4개(`api_rw`, `agent_ro`, `pipeline_rw`, `backup_ro`)와 권한, 모든 `private` 테이블의 RLS(브라우저 역할에는 정책 없음), `raw_documents`. `private` 스키마·DB 로그인·RLS는 BE-1, `knowledge` 스키마와 `raw_documents`는 BE-2가 맡는다. | 빈 로컬 DB와 staging에 깨끗이 적용<br>`agent_ro`의 `private` 읽기와 브라우저 공개 키의 모든 읽기 100% 거부<br>`api_rw`, `pipeline_rw`도 정한 권한 밖은 100% 거부 |
+| 로그인 설정<br>(BE-1 · Sprint 0) | Supabase Auth 이메일 코드(6자리, 10분 유효), 학교 도메인(`@skku.edu`, `@g.skku.edu`)만 받는 `auth.users` 트리거, 팀 계정 Gmail SMTP. | `@g.skku.edu`로 1분 안에 코드 도착, 스팸함 아님<br>gmail.com 주소 거부<br>10분 지난 코드 실패 |
+| 크롤러<br>(BE-2 · 2, 4, 5) | `pipeline/collect/`에 출처마다 작은 크롤러 하나(공통 `Source` 인터페이스), 출처 목록은 `pipeline/sources.yaml`. 출처: 학교·학과 공지 게시판, 학사일정, 학과 홈페이지의 졸업요건·교육과정·로드맵 페이지와 PDF(학기마다 수동 실행), 킹고인포 개설강좌. 도구: httpx + BeautifulSoup4(lxml), RSS는 feedparser, JavaScript로만 그려지는 페이지만 Playwright, PDF는 pdfplumber 또는 PyMuPDF. 공개 페이지만, robots.txt 준수, 사이트마다 초당 1회 이하, 프로젝트를 밝히는 User-Agent. `raw_documents`에 URL과 내용 해시로 저장한다. | 저장한 페이지 스냅샷 100%가 기대한 제목·날짜·URL로 파싱됨<br>다시 돌려도 중복 행 0건<br>새 공지가 6시간 안에 화면에 나옴<br>robots.txt가 막은 주소 요청 0건 |
 | .ics 동기화<br>(BE-2 · 1) | 학생별 암호화된 i-Campus 주소로 매시간 가져와 `tasks`(source = ics)에 넣고 바뀐 것을 고친다. 반복 일정은 icalendar + recurring-ical-events로 펼친다. | 반복 일정이 정확히 펼쳐짐<br>마감 일시 일치율(M-01) 98% 이상: 표본 100건을 원본과 대조<br>i-Campus 변경이 1시간 안에 반영 |
 | 링크 점검<br>(BE-2 · 2) | 매일 바로가기 링크를 열어 보고 결과를 `links`에 기록한다. | 링크 정상률(M-19) 99% 이상<br>끊긴 링크가 관리자 화면에 보임 |
 | 정기 작업과 배포<br>(BE-2 · Sprint 0–6) | `pipeline-hourly.yml`(매시간 .ics, cron은 정각을 피함, 3시간마다 크롤링과 정리), `pipeline-daily.yml`(05:00 KST 카드, 링크 점검, 지표 집계, age 암호화 백업 7일 보관, 2학기 지난 공지 삭제), `release.yml`(마이그레이션 → 졸업 규칙 YAML 싣기 → Render 배포 훅 → `/health` 확인 → Vercel CLI 웹 배포), PR마다 Vercel CLI 미리보기, UptimeRobot 5분 확인. | `ci.yml`·`release.yml` 통과, `/health` 200<br>Vercel CLI 배포와 PR 미리보기 동작<br>매일 작업이 `metric_logs`에 기록<br>Actions 로그에 이름·이메일·.ics 주소 0건 |
-| 백업<br>(BE-2 · 6) | 매일 암호화 백업을 로컬 Supabase로 복원해 본다. | 2주마다 복원 성공, 행 수 일치 |
+| 백업<br>(BE-1 · 6) | 매일 암호화 백업을 로컬 Supabase로 복원해 본다. | 2주마다 복원 성공, 행 수 일치 |
  
 ### AI·RAG
  
@@ -384,6 +389,7 @@ class RuleEngine(Protocol):  # rules/의 순수 함수. 입출력과 LLM 없음
 | 개발 항목 | 만드는 것 | 완료 기준 |
 |---|---|---|
 | `contracts/agent.py`, `main.py`<br>(Sprint 0) | API ↔ Agent 인터페이스(`AgentFacade`, `RuleEngine`, 주고받는 Pydantic 모델)와 실제 구현체를 연결하는 `main.py`(`AGENT_MODE`로 같은 컨테이너 또는 별도 서버). 인터페이스는 Sprint 0이 끝나면 고정한다. | mypy 통과<br>`FakeAgent`와 실제 Agent가 같은 인터페이스 시험 통과<br>import-linter 의존 방향 위반 0건 |
+| `FakeAgent`<br>(Sprint 0) | `AgentFacade`를 고정된 답으로 흉내 내는 대역. 실제 Agent를 만드는 쪽이 `contracts/agent.py`와 함께 만들고, BE가 요청한 상황(정상 답변, 오류, 시간 초과, `rule_conflict`, 기억 제안)을 골라 쓸 수 있게 한다. AI·RAG가 준비되기 전까지 BE와 FE가 이것으로 개발한다. | 실제 Agent와 같은 인터페이스 시험 통과<br>BE가 요청한 상황마다 고정된 답이 있음 |
 | CI 게이트<br>(Sprint 0) | `ci.yml`: 정적 검사(ruff, mypy, ESLint, tsc, import-linter), 단위 시험, 인터페이스 시험, 회귀 시험. LLM은 녹화한 응답을 재생해 CI에서 실제 호출을 하지 않는다. | 정적 검사 오류 0건<br>CI의 실제 LLM 호출 0회<br>기한 추출(M-02)이나 졸업요건 지표(M-10–M-14)가 떨어지면 병합 차단 |
 | 평가 데이터<br>(Sprint 0–5) | `evaluation/`: 마감 표본 100건(M-01), 라벨 공지 50건(M-02), 졸업요건 사례 20개(M-10–M-14), 학생 정정 사례 20개. 정답과 함께 저장소에 둔다. | 모든 표본에 정답과 원본 출처가 있음 |
 | 추적 표시<br>(모든 단계) | 모든 시험에 다루는 기능과 지표를 적는다(예: `# 졸업요건 진단, M-10`). | 모든 기능이 시험과 연결됨 |
